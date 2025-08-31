@@ -1,0 +1,9 @@
+torch
+torchaudio
+torchvision
+faster-whisper
+google-generativeai
+python-dotenv
+pydub
+mutagen
+demucs
