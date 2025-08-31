@@ -44,7 +44,7 @@ demucs
 GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 MODEL_SIZE="large-v2" 
 LLM_PROVIDER="gemini"
-GEMINI_MODEL_NAME="gemini-1.5-flash"
+GEMINI_MODEL_NAME="gemini-2.5-flash"
 ```
 
 *   `GEMINI_API_KEY`: 你的 Google Gemini API 密钥。
