@@ -211,13 +211,19 @@ def separate_vocals(audio_path: Path):
     print(f"\n步骤 1/4: 使用 Demucs 分离人声 -> {audio_path.name}")
     try:
         command = ["demucs", "--two-stems=vocals", str(audio_path.resolve())]
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        # 移除 text=True 和 encoding，捕获原始字节流以避免解码错误
+        subprocess.run(command, check=True, capture_output=True)
         vocal_path = Path("separated") / "htdemucs" / audio_path.stem / "vocals.wav"
         if vocal_path.exists():
             print(f"人声文件已成功分离 -> {vocal_path}")
             return vocal_path
-    except Exception as e:
+    except subprocess.CalledProcessError as e:
+        # 手动解码 stderr，替换无法识别的字符
+        stderr_text = e.stderr.decode('utf-8', errors='replace')
         print(f"Demucs 分离人声失败: {e}")
+        print(f"--- Demucs 详细错误信息 ---\n{stderr_text}\n--------------------------")
+    except Exception as e:
+        print(f"Demucs 分离人声时发生未知错误: {e}")
     return None
 
 def detect_language(model, audio_path: Path):
@@ -311,7 +317,7 @@ def generate_lrc_file(llm_model, original_audio_path: Path, segments, metadata: 
         f.write(full_lrc_content)
         
     print("LRC 文件生成成功。")
-    return full_lrc_content
+    return full_lrc_content, is_chinese_song
 
 def write_lyrics_to_tag(audio_path: Path, lrc_content: str):
     """将歌词内容写入音频文件的LYRICS标签，先清除旧标签。"""
@@ -352,23 +358,24 @@ def process_file(whisper_model, llm_model, file_path: Path):
     lrc_path = file_path.with_suffix('.lrc')
     if lrc_path.exists():
         print(f"歌词文件 '{lrc_path.name}' 已存在，跳过处理。")
-        return
+        return False # 默认返回False，表示非中文歌曲，以便在跳过时也能正常等待
         
     metadata = get_audio_metadata(file_path)
     
     vocal_file_path = separate_vocals(file_path)
-    if not vocal_file_path: return
+    if not vocal_file_path: return False
 
     detected_lang = detect_language(whisper_model, vocal_file_path)
     
     segments = transcribe_vocals(whisper_model, vocal_file_path, language=detected_lang)
-    if not segments: return
+    if not segments: return False
 
-    lrc_content = generate_lrc_file(llm_model, file_path, segments, metadata, detected_lang)
+    lrc_content, is_chinese_song = generate_lrc_file(llm_model, file_path, segments, metadata, detected_lang)
     if lrc_content:
         write_lyrics_to_tag(file_path, lrc_content)
         
     print(f"\n文件 {file_path.name} 处理完成。")
+    return is_chinese_song
 
 def main():
     parser = argparse.ArgumentParser(description="AI 歌词生成工具 (Demucs + Whisper + LLM)")
@@ -398,12 +405,20 @@ def main():
             process_file(whisper_model, llm_model, input_path)
     elif input_path.is_dir():
         audio_files = [p for p in input_path.glob("**/*") if p.suffix.lower() in SUPPORTED_EXTENSIONS]
-        print(f"找到 {len(audio_files)} 个音频文件。")
+        total_files = len(audio_files)
+        print(f"找到 {total_files} 个音频文件。")
         for i, file_path in enumerate(audio_files):
-            process_file(whisper_model, llm_model, file_path)
+            is_chinese_song = process_file(whisper_model, llm_model, file_path)
+            
+            # 打印处理进度
+            print(f"\n处理进度: {i + 1} / {total_files}")
+
             if i < len(audio_files) - 1:
-                print("\n为了遵守API速率限制，等待6秒后处理下一个文件...")
-                time.sleep(6)
+                if is_chinese_song:
+                    print("\n中文歌曲处理完成，立即处理下一个文件...")
+                else:
+                    print("\n为了遵守API速率限制，等待6秒后处理下一个文件...")
+                    time.sleep(6)
     
     separated_dir = Path("separated")
     if separated_dir.exists():
