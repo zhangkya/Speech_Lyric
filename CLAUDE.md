@@ -8,7 +8,11 @@ This is a Python command-line tool for generating lyrics from audio files. It co
 
 1. **Demucs**: Separates vocals from accompaniment
 2. **Faster-Whisper**: Transcribes vocals into text with precise timestamps
-3. **Google Gemini**: Cleans transcribed lyrics, removes non-lyric content, and translates non-Chinese songs to bilingual format (original + Chinese)
+3. **LLM (Large Language Model)**: Cleans transcribed lyrics, removes non-lyric content, and translates non-Chinese songs to bilingual format
+
+**Supported LLM Providers:**
+- **Google Gemini**: Cloud API, requires API Key
+- **Ollama**: Local execution, free and privacy-preserving
 
 The tool can process single audio files or entire directories containing multiple audio files. It generates LRC files (standard synchronized lyric format) and can write lyrics directly to audio file metadata (tags).
 
@@ -19,7 +23,7 @@ The codebase consists of modular functions organized in a linear processing pipe
 - **Audio processing**: Uses `pydub` for audio manipulation
 - **Vocal separation**: Uses Demucs model via `demucs` package
 - **Speech transcription**: Uses Faster-Whisper models (`faster_whisper` package)
-- **Lyric cleaning/translation**: Uses Google Gemini API (`google.generativeai` package)
+- **Lyric cleaning/translation**: Uses configurable LLM provider (see `llm_providers/` module)
 - **Metadata handling**: Uses `mutagen` for reading/writing audio file metadata
 - **File I/O**: Uses `pathlib` for file path handling
 
@@ -27,7 +31,12 @@ Key scripts:
 - `run.py`: Main script for processing both Chinese and non-Chinese songs with translation
 - `run_zh.py`: Optimized variant for Chinese songs (lyric cleaning only, no translation)
 - `GPU_test.py`: Tests PyTorch CUDA/GPU support
-- `test_song_story.py`: Test script for song story generation
+- `test_ollama.py`: Tests Ollama connection and functionality
+
+LLM Provider Module (`llm_providers/`):
+- `base.py`: Base interface for all LLM providers
+- `gemini_provider.py`: Google Gemini implementation
+- `ollama_provider.py`: Ollama local model implementation
 
 ## Development Commands
 
@@ -64,9 +73,11 @@ python GPU_test.py
 
 Configuration is managed through `.env` file with these variables:
 - `MODEL_SIZE`: Whisper model size (`tiny`, `base`, `small`, `medium`, `large-v2`, `large-v3`)
-- `LLM_PROVIDER`: Currently only `gemini` supported
+- `LLM_PROVIDER`: LLM provider (`gemini` or `ollama`)
 - `GEMINI_API_KEY`: Your Google Gemini API key
 - `GEMINI_MODEL_NAME`: Gemini model name (default: `gemini-2.5-flash`)
+- `OLLAMA_BASE_URL`: Ollama service URL (default: `http://localhost:11434`)
+- `OLLAMA_MODEL`: Ollama model name (e.g., `qwen2.5:7b`, `llama3:8b`)
 
 ## Code Structure Patterns
 
@@ -82,6 +93,7 @@ Configuration is managed through `.env` file with these variables:
 - `torch`, `torchaudio`, `torchvision`: PyTorch ecosystem
 - `faster-whisper`: Efficient Whisper implementation
 - `google-generativeai`: Gemini API client
+- `ollama`: Ollama local LLM client
 - `python-dotenv`: Environment variable management
 - `pydub`: Audio manipulation
 - `mutagen`: Audio metadata handling

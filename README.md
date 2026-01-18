@@ -4,7 +4,11 @@
 
 *   **Demucs:** 用于将人声从伴奏中分离出来。
 *   **Faster-Whisper:** 用于将人声转录成带精确时间戳的文本。
-*   **Google Gemini:** 用于清理转录后的歌词，移除无歌词内容，并为非中文歌曲翻译成双语格式（原文和中文）。
+*   **大语言模型 (LLM):** 用于清理转录后的歌词，移除无歌词内容，并为非中文歌曲翻译成双语格式（原文和中文）。
+
+支持的 LLM 提供商：
+*   **Google Gemini:** 云端 API，需要 API Key
+*   **Ollama:** 本地运行，完全免费且保护隐私
 
 该工具可以处理单个音频文件或包含多个音频文件的整个目录。它会生成LRC文件（一种标准的同步歌词格式），并且还可以将歌词直接写入音频文件的元数据（标签）中。
 
@@ -40,17 +44,33 @@ demucs
 
 在项目根目录下创建一个 `.env` 文件，并添加以下内容：
 
-```
+```bash
+# Whisper 模型配置
+MODEL_SIZE=large-v2
+
+# LLM 提供商选择
+# 可选值: gemini, ollama
+LLM_PROVIDER=gemini
+
+# Gemini 配置
 GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
-MODEL_SIZE="large-v2" 
-LLM_PROVIDER="gemini"
 GEMINI_MODEL_NAME="gemini-2.5-flash"
+
+# Ollama 配置（本地运行，无需 API Key）
+OLLAMA_BASE_URL="http://localhost:11434"
+OLLAMA_MODEL="qwen2.5:7b"
 ```
 
-*   `GEMINI_API_KEY`: 你的 Google Gemini API 密钥。
-*   `MODEL_SIZE`: 要使用的 Whisper 模型大小 (例如, `tiny`, `base`, `small`, `medium`, `large-v2`)。
-*   `LLM_PROVIDER`: 要使用的语言模型提供商。目前仅支持 "gemini"。
-*   `GEMINI_MODEL_NAME`: 要使用的具体 Gemini 模型。
+**配置说明：**
+
+| 变量 | 说明 | 示例值 |
+|------|------|--------|
+| `MODEL_SIZE` | Whisper 模型大小 | `large-v2`, `medium`, `small` |
+| `LLM_PROVIDER` | LLM 提供商 | `gemini` 或 `ollama` |
+| `GEMINI_API_KEY` | Google Gemini API Key | 从 Google AI Studio 获取 |
+| `GEMINI_MODEL_NAME` | Gemini 模型名称 | `gemini-2.5-flash` |
+| `OLLAMA_BASE_URL` | Ollama 服务地址 | `http://localhost:11434` |
+| `OLLAMA_MODEL` | Ollama 模型名称 | `qwen2.5:7b` |
 
 **3. 运行工具:**
 
@@ -77,6 +97,54 @@ python run_zh.py "path/to/your/audio.mp3"
 ```bash
 python GPU_test.py
 ```
+
+## 使用 Ollama 本地模型
+
+Ollama 允许你在本地运行大语言模型，无需 API Key，完全免费且保护隐私。
+
+### 安装 Ollama
+
+1. **下载安装:** 访问 [https://ollama.com/](https://ollama.com/) 下载并安装
+2. **启动服务:**
+   ```bash
+   ollama serve
+   ```
+3. **下载模型:**
+   ```bash
+   # 推荐中文模型 (需要约 5GB 显存)
+   ollama pull qwen2.5:7b
+
+   # 轻量级版本 (需要约 2GB 显存)
+   ollama pull qwen2.5:3b
+
+   # 通用模型
+   ollama pull llama3:8b
+   ```
+
+### 配置使用 Ollama
+
+编辑 `.env` 文件：
+
+```bash
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=qwen2.5:7b
+```
+
+### 测试 Ollama 连接
+
+```bash
+python test_ollama.py
+```
+
+### Ollama vs Gemini 对比
+
+| 特性 | Ollama | Gemini |
+|------|--------|--------|
+| 成本 | 免费（硬件成本） | 按用量计费 |
+| 延迟 | 取决于本地硬件 | 网络延迟 |
+| 隐私 | 完全本地 | 数据上传云端 |
+| 配置复杂度 | 需安装和下载模型 | 只需 API Key |
+| 质量 | 中高（7B 模型） | 高 |
 
 ## 开发约定
 

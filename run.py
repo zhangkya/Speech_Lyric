@@ -26,24 +26,37 @@ LLM_PROVIDER = os.getenv('LLM_PROVIDER')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 GEMINI_MODEL_NAME = os.getenv('GEMINI_MODEL_NAME', 'gemini-2.5-flash') # 默认为2.5 flash
 
+# Ollama配置
+OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen2.5:7b')
+
 # 定义支持的音频文件扩展名
 SUPPORTED_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.aac', '.ogg', '.wma'}
 
 def configure_llm():
-    """根据环境变量配置并返回LLM模型实例"""
+    """根据环境变量配置并返回LLM提供者实例"""
+    from llm_providers import GeminiProvider, OllamaProvider
+
+    llm_provider = None
+
     if LLM_PROVIDER and LLM_PROVIDER.lower() == 'gemini':
-        if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_GEMINI_API_KEY":
-            print("警告: .env文件中未提供有效的GEMINI_API_KEY。将跳过LLM歌词清理。")
-            return None
-        try:
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-            print(f"Gemini模型({GEMINI_MODEL_NAME})已成功配置。")
-            return model
-        except Exception as e:
-            print(f"配置Gemini模型失败: {e}。将跳过LLM歌词清理。")
-            return None
-    return None
+        provider = GeminiProvider(GEMINI_API_KEY, GEMINI_MODEL_NAME)
+        llm_provider = provider.configure()
+        if llm_provider:
+            print(f"Gemini 模型 ({GEMINI_MODEL_NAME}) 已成功配置。")
+        else:
+            print("警告: .env 文件中未提供有效的 GEMINI_API_KEY。将跳过 LLM 歌词清理。")
+
+    elif LLM_PROVIDER and LLM_PROVIDER.lower() == 'ollama':
+        provider = OllamaProvider(OLLAMA_BASE_URL, OLLAMA_MODEL)
+        llm_provider = provider.configure()
+        if llm_provider:
+            print(f"Ollama 模型 ({OLLAMA_MODEL}) 已成功配置。")
+
+    if not llm_provider:
+        print("警告: 未配置有效的 LLM。将跳过歌词清理和翻译。")
+
+    return llm_provider
 
 def get_audio_metadata(audio_path: Path):
     """使用mutagen读取音频文件的元数据"""
@@ -92,6 +105,27 @@ def _clean_llm_lrc_output(raw_text: str) -> str:
 
     return lrc_content
 
+def _call_llm(llm_model, prompt: str) -> str:
+    """统一的 LLM 调用接口，适配不同的 Provider"""
+    try:
+        # Ollama 使用 Client 对象
+        if llm_model.__class__.__name__ == 'Client' or hasattr(llm_model, 'chat'):
+            response = llm_model.chat(
+                model=OLLAMA_MODEL,
+                messages=[{'role': 'user', 'content': prompt}],
+                stream=False
+            )
+            return response['message']['content']
+        # Gemini 使用 GenerativeModel 对象
+        elif hasattr(llm_model, 'generate_content'):
+            response = llm_model.generate_content(prompt)
+            return response.text
+        else:
+            raise RuntimeError(f"不支持的 LLM 模型类型: {type(llm_model)}")
+    except Exception as e:
+        raise RuntimeError(f"调用 LLM 失败: {e}")
+
+
 def clean_lyrics_bulk_with_llm(llm_model, raw_lrc_content: str, metadata: dict):
     """使用LLM一次性清理所有歌词"""
     if not llm_model:
@@ -101,7 +135,7 @@ def clean_lyrics_bulk_with_llm(llm_model, raw_lrc_content: str, metadata: dict):
     title = metadata.get('title', '未知歌曲')
 
     prompt = f"""
-    你是一个专业的歌词内容审查员。你的任务是精确地判断由“{artist}”演唱的歌曲“{title}”的歌词，删除文本中无用的部分，只保留歌词本身。
+    你是一个专业的歌词内容审查员。你的任务是精确地判断由"{artist}"演唱的歌曲"{title}"的歌词，删除文本中无用的部分，只保留歌词本身。
     规则：
     1.  输入内容是标准的LRC格式，包含 `[mm:ss.xx]` 时间戳。
     2.  你的输出也必须保持完整的LRC格式，不得损坏或删除任何有效的时间戳。
@@ -116,27 +150,27 @@ def clean_lyrics_bulk_with_llm(llm_model, raw_lrc_content: str, metadata: dict):
     ---
     """
     try:
-        print("\n正在调用LLM进行批量清理，请稍候...")
-        response = llm_model.generate_content(prompt)
-        cleaned_lrc = _clean_llm_lrc_output(response.text)
+        print(f"\n正在调用 LLM ({LLM_PROVIDER}) 进行批量清理，请稍候...")
+        response_text = _call_llm(llm_model, prompt)
+        cleaned_lrc = _clean_llm_lrc_output(response_text)
 
         # 找出被删除的行并打印
         original_lines = set(raw_lrc_content.strip().split('\n'))
         cleaned_lines = set(cleaned_lrc.strip().split('\n'))
         deleted_lines = original_lines - cleaned_lines
-        
+
         if deleted_lines:
-            print("--- LLM清理报告: 删除了以下几行 ---")
+            print(f"--- LLM 清理报告 (使用 {LLM_PROVIDER}): 删除了以下几行 ---")
             for line in sorted(list(deleted_lines)):
                 if line.strip():
                     print(line)
             print("---------------------------------")
         else:
-            print("LLM审查完成，未发现可删除的无用歌词。")
+            print("LLM 审查完成，未发现可删除的无用歌词。")
 
         return cleaned_lrc
     except Exception as e:
-        print(f"调用LLM进行批量歌词清理时出错: {e}。将使用原始歌词。")
+        print(f"调用 LLM 进行批量歌词清理时出错: {e}。将使用原始歌词。")
         return raw_lrc_content
 
 def translate_lyrics_to_bilingual(llm_model, raw_lrc_content: str, metadata: dict):
@@ -146,13 +180,13 @@ def translate_lyrics_to_bilingual(llm_model, raw_lrc_content: str, metadata: dic
 
     artist = metadata.get('artist', '未知艺术家')
     title = metadata.get('title', '未知歌曲')
-    
+
     # 获取歌曲背景故事
     # song_background = get_song_background_story(llm_model, artist, title)
 
     prompt = f"""
     请将由{artist}演唱的歌曲{title}翻译成中文，从而形成双语歌词。请严格遵守以下规则：
-    1.输入内容是标准的LRC格式，包含 `[mm:ss.xx]` 时间戳。  
+    1.输入内容是标准的LRC格式，包含 `[mm:ss.xx]` 时间戳。
     2.**翻译质量**: 翻译应保留原意，自然流畅，像中文歌词一样能唱出来。允许意译，但不要偏离核心意思。
     2.  **格式要求**: 每一行非中文歌词，都需要在新的一行提供中文翻译。原文和译文必须使用完全相同的时间戳。
         正确的格式示例：
@@ -167,13 +201,13 @@ def translate_lyrics_to_bilingual(llm_model, raw_lrc_content: str, metadata: dic
     ---
     """
     try:
-        print("\n正在调用LLM进行双语歌词翻译，请稍候...")
-        response = llm_model.generate_content(prompt)
-        bilingual_lrc = _clean_llm_lrc_output(response.text)
+        print(f"\n正在调用 LLM ({LLM_PROVIDER}) 进行双语歌词翻译，请稍候...")
+        response_text = _call_llm(llm_model, prompt)
+        bilingual_lrc = _clean_llm_lrc_output(response_text)
 
         return bilingual_lrc
     except Exception as e:
-        print(f"调用LLM进行双语歌词翻译时出错: {e}。将使用原始歌词。")
+        print(f"调用 LLM 进行双语歌词翻译时出错: {e}。将使用原始歌词。")
         return raw_lrc_content
 
 # def get_song_background_story(llm_model, artist: str, title: str):
